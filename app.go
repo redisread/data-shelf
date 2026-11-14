@@ -31,6 +31,7 @@ type tab struct {
 	validation string
 }
 type app struct {
+	trashItem  func(string) error
 	fileList   ui.ListState
 	store      *shelf.Store
 	win        *mygo.Window
@@ -54,7 +55,7 @@ type app struct {
 }
 
 func newApp(s *shelf.Store) *app {
-	a := &app{store: s, expanded: map[string]bool{".": true}, comments: true}
+	a := &app{store: s, trashItem: mygo.Shell.TrashItem, expanded: map[string]bool{".": true}, comments: true}
 	a.refresh()
 	return a
 }
@@ -283,7 +284,7 @@ func (a *app) trash(path string) {
 		if !a.flush() {
 			return
 		}
-		if !a.report(mygo.Shell.TrashItem(filepath.Join(a.store.Path, path))) {
+		if !a.report(a.trashItem(filepath.Join(a.store.Path, path))) {
 			return
 		}
 		var keep []*tab
@@ -551,16 +552,15 @@ func (a *app) view(c *ui.Context) {
 		}
 		width, _ := c.Size()
 		compact := width < 1180
-		showComments := a.comments && a.active != nil && !a.orphanView
 		ui.Row(c).Grow(1).MinHeight(0).FillWidth().AlignItems(ui.Stretch).Children(func() {
 			a.sidebar(c)
 			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
 				ui.Column(c).Grow(1).MinHeight(0).FillWidth().Children(func() { a.workspace(c) })
-				if showComments && compact {
+				if compact {
 					a.commentsView(c, true)
 				}
 			})
-			if showComments && !compact {
+			if !compact {
 				a.commentsView(c, false)
 			}
 		})

@@ -124,6 +124,10 @@ func (a *app) workspace(c *ui.Context) {
 	})
 }
 func (a *app) commentsView(c *ui.Context, compact bool) {
+	// Earlier controls in this frame may have closed or trashed the active tab.
+	if !a.comments || a.active == nil || a.orphanView {
+		return
+	}
 	t := a.active
 	theme := c.Theme()
 	panel := ui.Column(c).Shrink(0).Background(theme.Surface).BorderColor(theme.Border)
