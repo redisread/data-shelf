@@ -62,3 +62,11 @@ DATA_SHELF_ROOT=/tmp/data-shelf-demo go tool mygo dev
 - `GLOSSARY.md`、`docs/`：已确认的产品术语与决策。
 
 框架参考：[原生 UI](https://mygo.run/zh/docs/ui)、[代码编辑器](https://mygo.run/zh/docs/ui/code-editor)、[Markdown](https://mygo.run/zh/docs/ui/markdown)。
+
+## CI 与安装包
+
+每次 PR、推送 main 或 Actions 手动运行都会触发 macOS CI：依次验证依赖和 gofmt、运行 go vet、带竞态检测的测试及覆盖率、govulncheck 漏洞检查，最后构建 Apple Silicon 安装包。任何步骤失败都会阻止检查通过。
+
+从 [Actions](https://github.com/redisread/data-shelf/actions/workflows/check.yml) 的成功运行中下载 `data-shelf-macos-arm64-<commit>`，解压后包含 DMG、保留权限的 `.app.zip`、构建信息及 `SHA256SUMS`。执行 `shasum -a 256 -c SHA256SUMS` 验证下载内容。产物和覆盖率保留 14 天；可手动重跑旧提交对应的运行以重新生成。依赖使用当前 Go 1.27 补丁版本，Actions 固定提交 SHA，并由 Dependabot 每周提出升级 PR。
+
+CI 仅生成临时签名的测试安装包，不进行 Developer ID 签名、公证或发布 GitHub Release；构建不需要生产凭据。签名与 DMG 完整性检查不等同于真实窗口交互测试。
