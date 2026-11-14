@@ -18,6 +18,7 @@ import (
 )
 
 type tab struct {
+	rawText    string
 	doc        shelf.Document
 	editor     *editor.State
 	version    uint64
@@ -129,7 +130,7 @@ func (a *app) open(path string) {
 	}
 	b := editor.NewBuffer(d.Text)
 	b.SetLanguage(editor.LanguageForText(path, d.Text))
-	t := &tab{doc: d, editor: &editor.State{Buffer: b, Label: "文件内容", Placeholder: "粘贴日志或开始记录…", NoAutoClose: true}, format: shelf.Detect(path, d.Text)}
+	t := &tab{rawText: d.Text, doc: d, editor: &editor.State{Buffer: b, Label: "文件内容", Placeholder: "粘贴日志或开始记录…", NoAutoClose: true}, format: shelf.Detect(path, d.Text)}
 	t.doc.Text = b.String()
 
 	t.version = b.Version()
@@ -217,6 +218,9 @@ func (a *app) flush() bool {
 		}
 		saved, err := a.store.Save(snapshotDoc(t))
 		t.doc.Hash = saved.Hash
+		if saved.Hash == shelf.Hash(saved.Text) {
+			t.rawText = saved.Text
+		}
 		if !a.report(err) {
 			t.problem = err.Error()
 			if errors.Is(err, shelf.ErrConflict) {
@@ -368,6 +372,7 @@ func (a *app) resolve(t *tab, showCopy bool) {
 		disk, err := a.store.Load(t.doc.Path)
 		if err == nil {
 			t.doc = disk
+			t.rawText = disk.Text
 			t.editor.Buffer.Reset(disk.Text)
 			t.doc.Text = t.editor.Buffer.String()
 			t.version = t.editor.Buffer.Version()
@@ -416,8 +421,10 @@ func (a *app) sync() {
 	for _, t := range a.tabs {
 		a.capture(t)
 		if !t.conflict {
-			d := snapshotDoc(t)
-			d.Notes = append([]shelf.Annotation(nil), d.Notes...)
+			d := t.doc
+			if t.dirty {
+				d = snapshotDoc(t)
+			}
 			items = append(items, syncItem{t, d, t.revision, t.dirty})
 		}
 	}
@@ -455,6 +462,9 @@ func (a *app) sync() {
 				if r.err != nil {
 					if r.item.save && r.doc.Hash != "" {
 						t.doc.Hash = r.doc.Hash
+						if r.doc.Hash == shelf.Hash(r.doc.Text) {
+							t.rawText = r.doc.Text
+						}
 					}
 					t.problem = r.err.Error()
 					if errors.Is(r.err, shelf.ErrConflict) || errors.Is(r.err, os.ErrNotExist) {
@@ -464,6 +474,9 @@ func (a *app) sync() {
 				}
 				if r.item.save {
 					t.doc.Hash = r.doc.Hash
+					if r.doc.Hash == shelf.Hash(r.doc.Text) {
+						t.rawText = r.doc.Text
+					}
 					if t.revision == r.item.revision {
 						t.dirty = false
 						t.problem = ""
@@ -489,6 +502,9 @@ func (a *app) sync() {
 						t.doc.Notes = shelf.Reanchor(t.doc.Text, shelf.Normalize(r.doc.Text), t.doc.Notes)
 						t.doc.Text = shelf.Normalize(r.doc.Text)
 						t.doc.Hash = r.doc.Hash
+						if r.doc.Hash == shelf.Hash(r.doc.Text) {
+							t.rawText = r.doc.Text
+						}
 						t.editor.Buffer.Reset(r.doc.Text)
 						t.version = t.editor.Buffer.Version()
 						t.dirty = len(t.doc.Notes) > 0
@@ -744,6 +760,9 @@ func snapshotDoc(t *tab) shelf.Document {
 	var out bytes.Buffer
 	_, _ = t.editor.Buffer.WriteTo(&out) // bytes.Buffer.Write never fails.
 	d.Text = out.String()
+	if shelf.Normalize(t.rawText) == t.doc.Text {
+		d.Text = t.rawText
+	}
 	d.Notes = append([]shelf.Annotation(nil), t.doc.Notes...)
 	return d
 }

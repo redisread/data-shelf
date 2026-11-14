@@ -406,5 +406,5 @@ func retire(m *metadata, path string) bool {
 // Annotation offsets use the editor's LF-normalized UTF-8 text, while files
 // retain their original line endings through the editor's serialization.
 func Normalize(text string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	return strings.ReplaceAll(text, "\r\n", "\n")
 }
