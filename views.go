@@ -53,7 +53,7 @@ func (a *app) workspace(c *ui.Context) {
 			ui.Text(c, "给每一次排查，留一份记录").FontSize(24).Bold()
 			ui.Text(c, "创建文件，粘贴日志，选中文字留下评论。").TextColor(theme.TextMuted)
 			ui.Text(c, "JSON · Markdown · 本地保存").FontSize(12).TextColor(theme.TextMuted)
-			if ui.PrimaryButton(c, "新建第一份记录").Clicked() {
+			if ui.Button(c, "新建第一份记录").Clicked() {
 				a.startName("file")
 			}
 			ui.Text(c, "⌘N 新建文件    ⌘⇧N 新建文件夹").FontSize(11).TextColor(theme.TextMuted)
