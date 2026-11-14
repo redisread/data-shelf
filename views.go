@@ -17,29 +17,36 @@ func (a *app) workspace(c *ui.Context) {
 		a.orphanPanel(c)
 		return
 	}
-	ui.ScrollHorizontal(c).Height(42).FillWidth().Background(theme.Surface).Children(func() {
-		ui.Row(c).Gap(3).Padding(6, 8).Children(func() {
-			for _, t := range a.tabs {
-				ui.Row(c).Key(t).Gap(2).Children(func() {
-					title := filepath.Base(t.doc.Path)
-					if t.dirty {
-						title += " •"
-					}
-					button := ui.Button(c, title)
+	if len(a.tabs) > 0 {
+		ui.ScrollHorizontal(c).MinHeight(46).MaxHeight(46).FillWidth().KeepScrollbars(true).Background(theme.Surface).Children(func() {
+			ui.Row(c).Gap(4).Padding(6, 8).Children(func() {
+				for _, t := range a.tabs {
+					group := ui.Row(c).Key(t).Gap(2).Padding(0, 4).Radius(6)
 					if a.active == t {
-						button.Background(theme.Background).TextColor(theme.Accent)
+						group.Background(theme.Background).BorderWidth(0, 0, 2, 0).BorderColor(theme.Accent)
 					}
-					if button.Clicked() {
-						a.active = t
-						a.selected = t.doc.Path
-					}
-					if ui.Button(c, "×").Label("关闭 " + filepath.Base(t.doc.Path)).Clicked() {
-						a.closeTab(t)
-					}
-				})
-			}
+					group.Children(func() {
+						button := navigationButton(c, filepath.Base(t.doc.Path), false).MaxWidth(230).Tooltip(t.doc.Path)
+						button.Children(func() {
+							ui.Icon(c, fileGlyph(t.format)).Size(14, 14).Shrink(0)
+							ui.Text(c, filepath.Base(t.doc.Path)).SingleLine().Ellipsis("…").MinWidth(0).Shrink(1)
+							if t.dirty {
+								ui.Text(c, "•").TextColor(theme.Accent)
+							}
+						})
+						if button.Clicked() {
+							a.active = t
+							a.selected = t.doc.Path
+						}
+						if smallIconButton(c, "关闭 "+filepath.Base(t.doc.Path), iconClose).Clicked() {
+							a.closeTab(t)
+						}
+					})
+				}
+			})
 		})
-	})
+	}
+
 	if a.active == nil {
 		ui.Column(c).Grow(1).FillWidth().Center().Gap(15).Children(func() {
 			ui.Text(c, "{ }").FontSize(48).TextColor(theme.Accent)
@@ -54,7 +61,10 @@ func (a *app) workspace(c *ui.Context) {
 		return
 	}
 	t := a.active
-	ui.Row(c).Padding(9, 12).Gap(7).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(theme.Border).Children(func() {
+	ui.Row(c).Padding(10, 16, 0, 16).Children(func() {
+		ui.Text(c, t.doc.Path).SingleLine().Ellipsis("…").FontSize(11).TextColor(theme.TextMuted).Grow(1).MinWidth(0).Tooltip(t.doc.Path).Focusable().Label("当前文件路径")
+	})
+	ui.Toolbar(c, func() {
 		if t.format == shelf.JSON {
 			if ui.Button(c, "格式化 JSON").Tooltip("⌘⇧F").Clicked() {
 				a.formatJSON()
@@ -79,7 +89,7 @@ func (a *app) workspace(c *ui.Context) {
 		if ui.Button(c, "评论栏").Clicked() {
 			a.comments = !a.comments
 		}
-	})
+	}).FillWidth().Padding(8, 12).Gap(8).Wrap().BorderWidth(0, 0, 1, 0).BorderColor(theme.Border)
 	if t.conflict {
 		ui.Column(c).Padding(10, 14).Gap(7).Background(theme.Surface).Children(func() {
 			ui.Text(c, "检测到外部修改，已暂停自动保存").Bold()
@@ -109,16 +119,22 @@ func (a *app) workspace(c *ui.Context) {
 			editor.View(c, t.editor).Grow(1).FillHeight()
 		}
 		if t.format == shelf.Markdown && t.mode != 0 {
-			ui.Scroll(c).Key("preview-"+t.doc.Path).Grow(1).FillHeight().BorderWidth(0, 0, 0, 1).BorderColor(theme.Border).Children(func() { markdown.View(c, t.doc.Text, &a.md).FillWidth().Padding(24) })
+			ui.Scroll(c).Key("preview-" + t.doc.Path).Grow(1).FillHeight().BorderStartWidth(1).BorderColor(theme.Border).Children(func() { markdown.View(c, t.doc.Text, &a.md).FillWidth().Padding(24) })
 		}
 	})
 }
-func (a *app) commentsView(c *ui.Context) {
+func (a *app) commentsView(c *ui.Context, compact bool) {
 	t := a.active
 	theme := c.Theme()
-	ui.Column(c).Width(286).Shrink(0).FillHeight().Background(theme.Surface).BorderWidth(0, 0, 0, 1).BorderColor(theme.Border).Children(func() {
+	panel := ui.Column(c).Shrink(0).Background(theme.Surface).BorderColor(theme.Border)
+	if compact {
+		panel.FillWidth().Height(230).BorderWidth(1, 0, 0, 0)
+	} else {
+		panel.Width(286).FillHeight().BorderStartWidth(1)
+	}
+	panel.Children(func() {
 		ui.Row(c).Padding(16).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, fmt.Sprintf("评论  %d", len(t.doc.Notes))).Bold().Grow(1)
+			ui.Text(c, fmt.Sprintf("评论 · %d", len(t.doc.Notes))).FontSize(13).Bold().Grow(1)
 			if ui.Button(c, "收起").Clicked() {
 				a.comments = false
 			}
@@ -133,21 +149,25 @@ func (a *app) commentsView(c *ui.Context) {
 			remove := -1
 			for i := range t.doc.Notes {
 				n := &t.doc.Notes[i]
-				ui.Column(c).Key(n.ID).Margin(6, 10).Padding(12).Gap(8).Background(theme.Background).Radius(8).Children(func() {
+				ui.Column(c).Key(n.ID).Margin(0, 12, 12, 12).Padding(12).Gap(8).Background(theme.Background).Radius(20).Children(func() {
 					quote := n.Quote
 					r := []rune(quote)
 					if len(r) > 110 {
 						quote = string(r[:110]) + "…"
 					}
-					ui.Text(c, quote).FontSize(12).TextColor(theme.TextMuted)
+					ui.Text(c, quote).FontSize(12).TextColor(theme.TextMuted).Tooltip(n.Quote).Focusable().Label("评论原文：" + n.Quote)
 					if n.Detached {
 						ui.Text(c, "待重新定位").FontSize(11).TextColor(theme.Accent)
 					}
-					input := ui.TextArea(c, &n.Comment).Label("评论 " + n.ID).Placeholder("写下你的发现…").FillWidth().Height(90)
+					inputHeight := float32(90)
+					if compact {
+						inputHeight = 64
+					}
+					input := ui.TextArea(c, &n.Comment).Label("评论 " + n.ID).Placeholder("写下你的发现…").FillWidth().Height(inputHeight).Radius(8)
 					if input.Changed() {
 						a.changed(t)
 					}
-					ui.Row(c).Gap(6).Children(func() {
+					ui.Row(c).Gap(8).Wrap().Children(func() {
 						if !n.Detached {
 							if ui.Button(c, "定位原文").Clicked() {
 								t.mode = 0
