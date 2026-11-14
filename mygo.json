@@ -1,0 +1,6 @@
+{
+  "name": "data-shelf",
+  "identifier": "app.redisread.data-shelf",
+  "version": "0.1.0",
+  "out": "build"
+}
