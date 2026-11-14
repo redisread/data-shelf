@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -130,9 +131,7 @@ func (a *app) open(path string) {
 	b.SetLanguage(editor.LanguageForText(path, d.Text))
 	t := &tab{doc: d, editor: &editor.State{Buffer: b, Label: "文件内容", Placeholder: "粘贴日志或开始记录…", NoAutoClose: true}, format: shelf.Detect(path, d.Text)}
 	t.doc.Text = b.String()
-	if t.doc.Text != d.Text {
-		t.doc.Notes = shelf.Reanchor(d.Text, t.doc.Text, d.Notes)
-	}
+
 	t.version = b.Version()
 	a.validate(t)
 	a.tabs = append(a.tabs, t)
@@ -216,7 +215,7 @@ func (a *app) flush() bool {
 		if !t.dirty {
 			continue
 		}
-		saved, err := a.store.Save(t.doc)
+		saved, err := a.store.Save(snapshotDoc(t))
 		t.doc.Hash = saved.Hash
 		if !a.report(err) {
 			t.problem = err.Error()
@@ -352,11 +351,15 @@ func (a *app) resolve(t *tab, showCopy bool) {
 		a.capture(t)
 		ext := filepath.Ext(t.doc.Path)
 		name := strings.TrimSuffix(filepath.Base(t.doc.Path), ext) + " (本地副本 " + time.Now().Format("20060102-150405") + ")" + ext
-		path, err := a.store.Create(filepath.Dir(t.doc.Path), name, false)
+		parent := filepath.Dir(t.doc.Path)
+		path, err := a.store.Create(parent, name, false)
+		if errors.Is(err, os.ErrNotExist) {
+			path, err = a.store.Create(".", name, false)
+		}
 		if !a.report(err) {
 			return
 		}
-		copyDoc := t.doc
+		copyDoc := snapshotDoc(t)
 		copyDoc.Path = path
 		copyDoc.Hash = shelf.Hash("")
 		if _, err = a.store.Save(copyDoc); !a.report(err) {
@@ -366,6 +369,7 @@ func (a *app) resolve(t *tab, showCopy bool) {
 		if err == nil {
 			t.doc = disk
 			t.editor.Buffer.Reset(disk.Text)
+			t.doc.Text = t.editor.Buffer.String()
 			t.version = t.editor.Buffer.Version()
 			t.dirty = false
 			t.conflict = false
@@ -412,7 +416,7 @@ func (a *app) sync() {
 	for _, t := range a.tabs {
 		a.capture(t)
 		if !t.conflict {
-			d := t.doc
+			d := snapshotDoc(t)
 			d.Notes = append([]shelf.Annotation(nil), d.Notes...)
 			items = append(items, syncItem{t, d, t.revision, t.dirty})
 		}
@@ -482,8 +486,8 @@ func (a *app) sync() {
 						t.conflict = true
 						t.problem = shelf.ErrConflict.Error()
 					} else {
-						t.doc.Notes = shelf.Reanchor(t.doc.Text, r.doc.Text, t.doc.Notes)
-						t.doc.Text = r.doc.Text
+						t.doc.Notes = shelf.Reanchor(t.doc.Text, shelf.Normalize(r.doc.Text), t.doc.Notes)
+						t.doc.Text = shelf.Normalize(r.doc.Text)
 						t.doc.Hash = r.doc.Hash
 						t.editor.Buffer.Reset(r.doc.Text)
 						t.version = t.editor.Buffer.Version()
@@ -521,6 +525,14 @@ func (a *app) view(c *ui.Context) {
 		a.addNote()
 	}
 	ui.Column(c).Fill().Background(theme.Background).Children(func() {
+		if a.status != "" {
+			ui.Row(c).FillWidth().Padding(7, 12).Gap(10).Background(theme.Surface).Children(func() {
+				ui.Text(c, a.status).FontSize(12).Grow(1)
+				if ui.Button(c, "×").Label("关闭提示").Clicked() {
+					a.status = ""
+				}
+			})
+		}
 		ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
 			a.sidebar(c)
 			ui.Column(c).Grow(1).FillHeight().Children(func() { a.workspace(c) })
@@ -726,3 +738,12 @@ func (a *app) dropTarget(e ui.Element, parent string) {
 	}
 }
 func cyan() ui.Color { return ui.Hex("#1f9b99") }
+
+func snapshotDoc(t *tab) shelf.Document {
+	d := t.doc
+	var out bytes.Buffer
+	_, _ = t.editor.Buffer.WriteTo(&out) // bytes.Buffer.Write never fails.
+	d.Text = out.String()
+	d.Notes = append([]shelf.Annotation(nil), t.doc.Notes...)
+	return d
+}

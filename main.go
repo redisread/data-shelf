@@ -73,6 +73,7 @@ func saveSettings(root string) error {
 	return os.Rename(tmp.Name(), path)
 }
 func main() {
+	mygo.App.SetLanguages("zh-CN")
 	mygo.App.WhenReady(func() {
 		root, err := loadRoot()
 		if err != nil {

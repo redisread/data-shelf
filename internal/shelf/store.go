@@ -27,8 +27,9 @@ type Record struct {
 	Notes []Annotation `json:"notes,omitempty"`
 }
 type metadata struct {
-	Version int               `json:"version"`
-	Records map[string]Record `json:"records"`
+	Archived []Record          `json:"archived,omitempty"`
+	Version  int               `json:"version"`
+	Records  map[string]Record `json:"records"`
 }
 type Store struct {
 	mu   sync.Mutex
@@ -219,9 +220,10 @@ func (s *Store) Load(path string) (Document, error) {
 	r := s.meta.Records[path]
 	notes := append([]Annotation(nil), r.Notes...)
 	hash := Hash(text)
+	normalized := Normalize(text)
 	for i := range notes {
 		n := &notes[i]
-		if r.Hash != hash || n.Start < 0 || n.End > len(text) || n.Start >= n.End || text[n.Start:n.End] != n.Quote {
+		if r.Hash != hash || n.Start < 0 || n.End > len(normalized) || n.Start >= n.End || normalized[n.Start:n.End] != n.Quote {
 			n.Detached = true
 		}
 	}
@@ -259,7 +261,7 @@ func (s *Store) persist(m metadata) error {
 	return nil
 }
 func (s *Store) copyMeta() metadata {
-	m := metadata{Version: 1, Records: map[string]Record{}}
+	m := metadata{Version: 1, Records: map[string]Record{}, Archived: append([]Record(nil), s.meta.Archived...)}
 	for k, v := range s.meta.Records {
 		v.Notes = append([]Annotation(nil), v.Notes...)
 		m.Records[k] = v
@@ -305,14 +307,26 @@ func (s *Store) Create(parent, name string, dir bool) (string, error) {
 	if err := s.check(path); err != nil {
 		return "", err
 	}
+	var err error
 	if dir {
-		return path, s.root.Mkdir(path, 0700)
+		err = s.root.Mkdir(path, 0700)
+	} else {
+		var f *os.File
+		f, err = s.root.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			err = f.Close()
+		}
 	}
-	f, err := s.root.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return "", err
 	}
-	return path, f.Close()
+	m := s.copyMeta()
+	if retire(&m, path) {
+		if err = s.persist(m); err != nil {
+			return "", errors.Join(err, s.root.Remove(path))
+		}
+	}
+	return path, nil
 }
 func (s *Store) Move(from, to string) error {
 	s.mu.Lock()
@@ -338,6 +352,7 @@ func (s *Store) Move(from, to string) error {
 		return err
 	}
 	m := s.copyMeta()
+	retire(&m, to)
 	for k, r := range s.meta.Records {
 		if k == from || strings.HasPrefix(k, from+string(filepath.Separator)) {
 			delete(m.Records, k)
@@ -356,7 +371,7 @@ func (s *Store) Move(from, to string) error {
 func (s *Store) Orphans() []Record {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []Record
+	out := append([]Record(nil), s.meta.Archived...)
 	for path, r := range s.meta.Records {
 		if len(r.Notes) == 0 {
 			continue
@@ -367,4 +382,29 @@ func (s *Store) Orphans() []Record {
 		}
 	}
 	return out
+}
+
+// A reused pathname must never erase comments belonging to its former file.
+func retire(m *metadata, path string) bool {
+	changed := false
+	for k, r := range m.Records {
+		if k == path || strings.HasPrefix(k, path+string(filepath.Separator)) {
+			if len(r.Notes) > 0 {
+				r.Notes = append([]Annotation(nil), r.Notes...)
+				for i := range r.Notes {
+					r.Notes[i].Detached = true
+				}
+				m.Archived = append(m.Archived, r)
+			}
+			delete(m.Records, k)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// Annotation offsets use the editor's LF-normalized UTF-8 text, while files
+// retain their original line endings through the editor's serialization.
+func Normalize(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 }

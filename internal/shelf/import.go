@@ -104,5 +104,14 @@ func (s *Store) Import(source, parent string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return dest, s.root.Rename(stage, dest)
+	if err = s.root.Rename(stage, dest); err != nil {
+		return "", err
+	}
+	m := s.copyMeta()
+	if retire(&m, dest) {
+		if err = s.persist(m); err != nil {
+			return "", errors.Join(err, s.root.Rename(dest, stage))
+		}
+	}
+	return dest, nil
 }

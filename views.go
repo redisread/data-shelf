@@ -186,11 +186,21 @@ func (a *app) orphanPanel(c *ui.Context) {
 			a.orphanView = false
 		}
 	})
-	ui.Text(c, "原文件被移走或删除，评论仍保留。将文件恢复到原路径后可重新关联。").Padding(0, 16, 12, 16).TextColor(c.Theme().TextMuted)
+	ui.Text(c, "原文件已移走或路径被复用，评论仍保留。先打开目标文件，即可复制评论并重新定位。").Padding(0, 16, 12, 16).TextColor(c.Theme().TextMuted)
 	ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-		for _, r := range a.orphans {
-			ui.Column(c).Key(r.Path).Margin(8, 16).Padding(16).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
+		for i, r := range a.orphans {
+			ui.Column(c).Key(fmt.Sprintf("%d:%s", i, r.Path)).Margin(8, 16).Padding(16).Gap(8).Background(c.Theme().Surface).Radius(8).Children(func() {
 				ui.Text(c, r.Path).Bold()
+
+				if a.active != nil {
+					if ui.Button(c, "复制评论到当前文件").Clicked() {
+						a.active.doc.Notes = append(a.active.doc.Notes, shelf.CopyAnnotations(r.Notes)...)
+						a.changed(a.active)
+						a.comments = true
+						a.orphanView = false
+						a.status = "已复制为待定位评论；选择原文后点击「关联当前选区」"
+					}
+				}
 				for _, n := range r.Notes {
 					ui.Text(c, strings.TrimSpace(n.Quote)).FontSize(12)
 					ui.Text(c, n.Comment).TextColor(c.Theme().TextMuted)

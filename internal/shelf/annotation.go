@@ -48,6 +48,11 @@ func Reanchor(old, text string, notes []Annotation) []Annotation {
 	}
 	for i := range out {
 		n := &out[i]
+		// Without an edit-event log, repeated quotes cannot prove identity.
+		// Prefer a detached note to silently attaching it to a surviving copy.
+		if strings.Index(old, n.Quote) != strings.LastIndex(old, n.Quote) || strings.Index(text, n.Quote) != strings.LastIndex(text, n.Quote) {
+			n.Detached = true
+		}
 		if n.Detached {
 			continue
 		}
@@ -120,6 +125,17 @@ func ReanchorFormatted(old, text string, notes []Annotation) []Annotation {
 		n.Start = bp[first]
 		n.End = bp[last] + 1
 		n.Quote = text[n.Start:n.End]
+	}
+	return out
+}
+
+// CopyAnnotations preserves archived originals while giving the destination
+// independent identities and requiring an explicit new text selection.
+func CopyAnnotations(notes []Annotation) []Annotation {
+	out := append([]Annotation(nil), notes...)
+	for i := range out {
+		out[i].ID = newID()
+		out[i].Detached = true
 	}
 	return out
 }
