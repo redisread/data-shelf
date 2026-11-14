@@ -54,7 +54,7 @@ type app struct {
 }
 
 func newApp(s *shelf.Store) *app {
-	a := &app{store: s, expanded: map[string]bool{".": true}, comments: true, status: "所有内容仅保存在本机"}
+	a := &app{store: s, expanded: map[string]bool{".": true}, comments: true}
 	a.refresh()
 	return a
 }
@@ -549,15 +549,23 @@ func (a *app) view(c *ui.Context) {
 				}
 			})
 		}
-		ui.Row(c).Grow(1).FillWidth().AlignItems(ui.Stretch).Children(func() {
+		width, _ := c.Size()
+		compact := width < 1180
+		showComments := a.comments && a.active != nil && !a.orphanView
+		ui.Row(c).Grow(1).MinHeight(0).FillWidth().AlignItems(ui.Stretch).Children(func() {
 			a.sidebar(c)
-			ui.Column(c).Grow(1).FillHeight().Children(func() { a.workspace(c) })
-			if a.comments && a.active != nil && !a.orphanView {
-				a.commentsView(c)
+			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Children(func() {
+				ui.Column(c).Grow(1).MinHeight(0).FillWidth().Children(func() { a.workspace(c) })
+				if showComments && compact {
+					a.commentsView(c, true)
+				}
+			})
+			if showComments && !compact {
+				a.commentsView(c, false)
 			}
 		})
 		ui.Row(c).Height(28).PaddingX(14).AlignItems(ui.Center).Background(theme.Surface).BorderWidth(1, 0, 0, 0).BorderColor(theme.Border).Children(func() {
-			label := a.status
+			label := "仅保存在此 Mac"
 			if a.active != nil {
 				t := a.active
 				switch {
@@ -577,183 +585,6 @@ func (a *app) view(c *ui.Context) {
 		})
 	})
 }
-func (a *app) sidebar(c *ui.Context) {
-	t := c.Theme()
-	panel := ui.Column(c).Width(248).FillHeight().Shrink(0).Background(t.Surface).BorderWidth(0, 1, 0, 0).BorderColor(t.Border)
-	panel.Children(func() {
-		ui.Column(c).Padding(18, 14, 12, 14).Gap(5).Children(func() {
-			ui.Text(c, "data-shelf").FontSize(22).Bold()
-			ui.Text(c, "日志与笔记，井然有序").FontSize(11).TextColor(t.TextMuted)
-		})
-		ui.Row(c).PaddingX(12).Gap(6).Children(func() {
-			if ui.Button(c, "＋ 文件").Label("新建文件").Grow(1).Clicked() {
-				a.startName("file")
-			}
-			if ui.Button(c, "＋ 文件夹").Label("新建文件夹").Grow(1).Clicked() {
-				a.startName("folder")
-			}
-		})
-		ui.TextInput(c, &a.filter).Placeholder("筛选文件名…").Label("筛选文件名").Margin(10, 12).FillWidth()
-		if a.naming != "" {
-			ui.Column(c).Padding(4, 12, 10, 12).Gap(5).Children(func() {
-				title := "新建文件"
-				if a.naming == "folder" {
-					title = "新建文件夹"
-				}
-				if a.naming == "rename" {
-					title = "重命名"
-				}
-				ui.Text(c, title+" · Enter 完成").FontSize(11).TextColor(t.TextMuted)
-				c.Key("name-" + a.naming)
-				input := ui.TextInput(c, &a.name).Label("名称").FillWidth()
-				if a.focusName {
-					input.Focus()
-					a.focusName = false
-				}
-				if input.Submitted() {
-					a.create()
-				}
-				if c.Shortcut(0, ui.KeyEscape) {
-					a.naming = ""
-				}
-			})
-		}
-		root := ui.Button(c, "资料目录").Key("root").FillWidth().BorderWidth(0).TextAlign(ui.Start)
-		if root.Clicked() {
-			a.selected = ""
-		}
-		a.dropTarget(root, ".")
-		visible := a.visibleEntries()
-		a.fileList.Key = func(i int) any { return visible[i].Path }
-		ui.List(c, &a.fileList, len(visible), func(i int) {
-			a.treeRow(c, visible[i])
-		}).Grow(1).FillWidth()
-		ui.Column(c).Padding(12).Gap(6).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-			if len(a.orphans) > 0 {
-				if ui.Button(c, fmt.Sprintf("未关联评论 · %d 份文件", len(a.orphans))).FillWidth().Clicked() {
-					a.orphanView = true
-				}
-			}
-			ui.Row(c).Gap(6).Children(func() {
-				if ui.Button(c, "导入文件").Grow(1).Clicked() {
-					a.chooseImport(false)
-				}
-				if ui.Button(c, "导入文件夹").Grow(1).Clicked() {
-					a.chooseImport(true)
-				}
-			})
-			ui.Row(c).Gap(6).Children(func() {
-				if ui.Button(c, "在 Finder 打开").Grow(1).Clicked() {
-					a.report(mygo.Shell.OpenPath(a.store.Path))
-				}
-				if ui.Button(c, "更换目录").Clicked() {
-					a.changeRoot()
-				}
-			})
-			ui.Text(c, a.store.Path).FontSize(10).TextColor(t.TextMuted).Tooltip(a.store.Path)
-		})
-	})
-	if files := panel.DroppedFiles(); len(files) > 0 {
-		a.importPaths(files, a.folder())
-	}
-}
-func (a *app) visibleEntries() []shelf.Entry {
-	matches := map[string]bool{}
-	query := strings.ToLower(a.filter)
-	if query != "" {
-		for _, e := range a.entries {
-			if strings.Contains(strings.ToLower(e.Path), query) {
-				for p := e.Path; p != "."; p = filepath.Dir(p) {
-					matches[p] = true
-				}
-			}
-		}
-	}
-	var out []shelf.Entry
-	for _, e := range a.entries {
-		if query != "" {
-			if matches[e.Path] {
-				out = append(out, e)
-			}
-			continue
-		}
-		visible := true
-		for p := filepath.Dir(e.Path); p != "."; p = filepath.Dir(p) {
-			if !a.expanded[p] {
-				visible = false
-				break
-			}
-		}
-		if visible {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-func (a *app) treeRow(c *ui.Context, e shelf.Entry) {
-	depth := strings.Count(e.Path, string(filepath.Separator))
-	label := e.Name
-	if e.Dir {
-		if a.expanded[e.Path] || a.filter != "" {
-			label = "▾  " + label
-		} else {
-			label = "▸  " + label
-		}
-	} else {
-		switch shelf.Detect(e.Name, "") {
-		case shelf.JSON:
-			label = "{}  " + label
-		case shelf.Markdown:
-			label = "M↓  " + label
-		default:
-			label = "·  " + label
-		}
-	}
-	row := ui.Button(c, label).Key(e.Path).Label(e.Name).FillWidth().Padding(5, 8, 5, float32(12+depth*14)).BorderWidth(0).TextAlign(ui.Start).Drag(e.Path)
-	if a.selected == e.Path {
-		row.Background(c.Theme().Accent).TextColor(ui.Hex("#ffffff"))
-	}
-	if row.Clicked() {
-		a.selected = e.Path
-		if e.Dir {
-			a.expanded[e.Path] = !a.expanded[e.Path]
-		} else {
-			a.open(e.Path)
-		}
-	}
-	row.ContextMenu(func(m *ui.Menu) {
-		if m.Item("重命名").Chosen() {
-			a.selected = e.Path
-			a.startName("rename")
-		}
-		if e.Dir {
-			if m.Item("新建文件").Chosen() {
-				a.selected = e.Path
-				a.startName("file")
-			}
-			if m.Item("新建文件夹").Chosen() {
-				a.selected = e.Path
-				a.startName("folder")
-			}
-		}
-		m.Separator()
-		if m.Item("移到废纸篓").Danger().Chosen() {
-			a.trash(e.Path)
-		}
-	})
-	if e.Dir {
-		a.dropTarget(row, e.Path)
-	}
-}
-func (a *app) dropTarget(e ui.Element, parent string) {
-	if _, over := ui.DragOver[string](e); over {
-		e.Background(cyan())
-	}
-	if from, ok := ui.Drop[string](e); ok {
-		a.whenIdle(func() { a.move(from, filepath.Join(parent, filepath.Base(from))) })
-	}
-}
-func cyan() ui.Color { return ui.Hex("#1f9b99") }
 
 func snapshotDoc(t *tab) shelf.Document {
 	d := t.doc
